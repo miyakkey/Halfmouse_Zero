@@ -58,6 +58,7 @@ int main(){
 
   while (true) {
     if ( mode == 1 ){
+      pc.printf( "%6.4f\n\r" , get_photovalue(0) ) ;
       wait(1.0);
       if (voltage_batt * VCC * 2.0 <= NGBATT ) {
         output_motor.detach();
@@ -76,6 +77,7 @@ void init(){
   cs1 = 1; cs2 = 1;
   for ( int i = 0 ; i < 2 ; i++ ){
     leds[i] = 0 ;
+    enable[i].period_us(10);
     enable[i] = 0 ;
   }
   pc.baud(115200);
@@ -106,10 +108,10 @@ void set_motor_value(){
   feadfoward(duty);
   for ( int i = 0 ; i < 2 ; i++ ){
     if ( duty[i] < 0 ){
-      phase[i] = 1 ;
+      phase[i] = 0 ;
       enable[i] = fabsf(duty[i]) ;
     } else {
-      phase[i] = 0 ;
+      phase[i] = 1 ;
       enable[i] = duty[i] ;
     }
   }
@@ -137,9 +139,9 @@ void feadfoward(float *_duty){
     //calculate speed
     speed = speed + t_accel*0.001;
     //calculate duty
-    for ( int i = 0 ; i < 2 ; i++ ) {
-      _duty[i] = ( F_C1*t_accel + F_C2*t_omega + F_C3*speed + F_C4[i] ) / vbat ;
-    }
+    _duty[0] = ( F_C1*t_accel + F_C2*t_omega + F_C3*speed + F_C4[0] ) / vbat ;
+    _duty[1] = ( F_C1*t_accel - F_C2*t_omega + F_C3*speed + F_C4[1] ) / vbat ;
+
   } else {
     _duty[0] = 0 ;
     _duty[1] = 0 ;
@@ -176,10 +178,10 @@ float get_photovalue(int pin){
   float temp;
 
   if ( pin < 4 && pin >= 0 ){
-    //temp = ltr4206[pin];
+    temp = ltr4206[pin].read();
     osi5[pin] = 1;
-    wait_ms(1);
-    temp = ltr4206[pin];// - temp;
+    wait_us(200);
+    temp = ltr4206[pin].read() - temp;
     osi5[pin] = 0;
     return temp;
   } else {
