@@ -1,6 +1,8 @@
+#include <math.h>
+
 #include "mbed.h"
 #include "MPU6500.h"
-#include <math.h>
+#include "SMA.h"
 
 #define NGBATT 3.6
 #define MOTOR_RESISTOR 4.5
@@ -18,7 +20,7 @@
 // Inhelit Class
 AnalogIn voltage_batt (PA_4);
 Serial pc (PA_2, PA_3);
-AnalogIn ltr4206[] = { PC_3, PC_2, PC_1, PC_0 };
+AnalogIn ltr4206[] = { PC_0, PC_1, PC_2, PC_3 };
 DigitalOut osi5[] = { PB_6, PB_7, PB_8, PB_9 };
 SPI mpu6500 ( PC_12, PC_11, PC_10 );
 SPI AS5047P ( PA_7, PA_6, PA_5 );
@@ -28,7 +30,26 @@ DigitalOut leds[] = { PB_4 , PB_5 };
 PwmOut enable[] = { PC_9 , PC_7 };
 DigitalOut phase[] = { PC_8 , PC_6 }; // 0 -- right, 1 -- left
 mpu6500_spi imu(mpu6500, PD_2);
-Ticker output_motor;
+Ticker output_motor_task;
+Ticker input_sensor_task;
+
+SMA sma_vbat(3);
+//SMA sma_ax(10);
+SMA sma_ay(10);
+SMA sma_omega(10);
+SMA sma_photo[4] = { SMA(5), SMA(5), SMA(5), SMA(5) } ;
+
+// stract
+typedef struct {
+  float vbat ;
+  //float ax ;
+  float ay ;
+  float omega ;
+  float photo[4] ;
+} sensor_t ;
+
+// Inherit struct
+sensor_t sensor;
 
 // constant
 const float F_C1 = (MOTOR_RESISTOR*MASS*TIRE_R)/(2.0*KT*GEAR_RATIO) ;
@@ -41,6 +62,8 @@ void init();
 float get_photovalue(int);
 float get_Angle(bool);
 void feadfoward(float *_duty);
+void feadback(float *_error);
+void set_sensor_value();
 void set_motor_value();
 
 // grobal varience
@@ -54,14 +77,15 @@ int main(){
   init();
 
   mode = 1 ;
-  output_motor.attach(&set_motor_value,0.001);
+  //output_motor_task.attach(&set_motor_value, 0.001);
+  input_sensor_task.attach(&set_sensor_value, 0.001) ;
 
   while (true) {
     if ( mode == 1 ){
-      pc.printf( "%6.4f\n\r" , get_photovalue(0) ) ;
+      //pc.printf( "%6.4f\n\r" , get_photovalue(0) ) ;
       wait(1.0);
-      if (voltage_batt * VCC * 2.0 <= NGBATT ) {
-        output_motor.detach();
+      if ( sensor.vbat <= NGBATT ) {
+        output_motor_task.detach();
         mode = 0;
       }
     } else if ( mode == 0 ){
@@ -102,10 +126,18 @@ void init(){
   AS5047P.frequency(1000000);
 }
 
+void set_sensor_value(){
+  sma_vbat.add(voltage_batt);
+  sensor.vbat = sma_vbat.get();
+  //これをくりかえす
+
+}
+
 void set_motor_value(){
   static float duty[2];
 
   feadfoward(duty);
+  //feadback(duty);
   for ( int i = 0 ; i < 2 ; i++ ){
     if ( duty[i] < 0 ){
       phase[i] = 0 ;
@@ -124,8 +156,6 @@ void feadfoward(float *_duty){
   static float speed = 0.0 ;
   float t_accel, t_omega ;
 
-  float vbat = voltage_batt * VCC * 2.0 ;
-
   if ( loadmatrix < preset_size ){
     //get preset data
     t_accel = preset[loadmatrix][0];
@@ -139,13 +169,18 @@ void feadfoward(float *_duty){
     //calculate speed
     speed = speed + t_accel*0.001;
     //calculate duty
-    _duty[0] = ( F_C1*t_accel + F_C2*t_omega + F_C3*speed + F_C4[0] ) / vbat ;
-    _duty[1] = ( F_C1*t_accel - F_C2*t_omega + F_C3*speed + F_C4[1] ) / vbat ;
+    _duty[0] = ( F_C1*t_accel + F_C2*t_omega + F_C3*speed + F_C4[0] ) / sensor.vbat ;
+    _duty[1] = ( F_C1*t_accel - F_C2*t_omega + F_C3*speed + F_C4[1] ) / sensor.vbat ;
 
   } else {
     _duty[0] = 0 ;
     _duty[1] = 0 ;
   }
+  return ;
+}
+
+void feadback(float *_error){
+  return ;
 }
 
 float get_Angle(bool cs){
@@ -174,13 +209,13 @@ float get_Angle(bool cs){
 }
 
 float get_photovalue(int pin){
-  // 0 ... left side, 3 ... right side
+  // 0 ... right side, 3 ... left side
   float temp;
 
   if ( pin < 4 && pin >= 0 ){
     temp = ltr4206[pin].read();
     osi5[pin] = 1;
-    wait_us(200);
+    wait_us(60);
     temp = ltr4206[pin].read() - temp;
     osi5[pin] = 0;
     return temp;

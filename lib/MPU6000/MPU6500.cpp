@@ -269,7 +269,7 @@ float mpu6500_spi::read_temp(){
                                 READ ALL data
 ------------------------------------------------------------------------------------------------*/
 void mpu6500_spi::read(float *data){
-  uint8_t response[14];
+  /*uint8_t response[14];
   int16_t bit_data;
 
   select();
@@ -296,6 +296,29 @@ void mpu6500_spi::read(float *data){
       data[i] = data[i]/acc_divider*9.80665;
     } else if ( i == 3 ){
       data[i] = (data[i]/333.7) + 21.0;
+    } else {
+      data[i] = data[i]/gyro_divider* 0.017453;
+    }
+  }*/ // temporary read function :: get all data
+  // ------------------------------------------------------//
+  // new read function :: get ax, ay, and omega
+  uint8_t response[6];
+  int16_t bit_data;
+
+  select();
+  response[0] = spi.write(MPUREG_ACCEL_XOUT_H | READ_FLAG);
+  response[0] = spi.write(MPUREG_ACCEL_XOUT_L | READ_FLAG);
+  response[1] = spi.write(MPUREG_ACCEL_YOUT_H | READ_FLAG);
+  response[2] = spi.write(MPUREG_ACCEL_YOUT_L | READ_FLAG);
+  response[3] = spi.write(MPUREG_GYRO_ZOUT_H | READ_FLAG);
+  response[4] = spi.write(MPUREG_GYRO_ZOUT_L | READ_FLAG);
+  response[5] = spi.write(0x00);
+  deselect();
+  for (int i = 0 ; i < 3 ; i++ ){
+    bit_data = ( (int16_t)response[i*2] << 8 ) | response[i*2+1];
+    data[i] = (float)bit_data;
+    if ( i < 2 ){
+      data[i] = data[i]/acc_divider*9.80665;
     } else {
       data[i] = data[i]/gyro_divider* 0.017453;
     }
