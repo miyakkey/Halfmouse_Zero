@@ -12,8 +12,8 @@
 #define INERTIA 1.0 //Moment of inertia
 #define WHEEL_LOSS_R 0
 #define WHEEL_LOSS_L 0
-#define MASS 0.015
-#define TIRE_R 0.05
+#define MASS 0.0156
+#define TIRE_R 0.006
 
 // Inhelit Class
 AnalogIn voltage_batt (PA_4);
