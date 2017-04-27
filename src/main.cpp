@@ -31,7 +31,7 @@ PwmOut enable[] = { PC_9 , PC_7 };
 DigitalOut phase[] = { PC_8 , PC_6 }; // 0 -- right, 1 -- left
 mpu6500_spi imu(mpu6500, PD_2);
 Ticker output_motor_task;
-Ticker input_sensor_task;
+//Ticker input_sensor_task;
 
 SMA sma_vbat(3);
 //SMA sma_ax(10);
@@ -78,11 +78,14 @@ int main(){
 
   mode = 1 ;
   //output_motor_task.attach(&set_motor_value, 0.001);
-  input_sensor_task.attach(&set_sensor_value, 0.001) ;
+  //input_sensor_task.attach(&set_sensor_value, 0.001) ;
 
   while (true) {
     if ( mode == 1 ){
+      // runnig task
+
       //pc.printf( "%6.4f\n\r" , get_photovalue(0) ) ;
+      set_sensor_value() ;
       wait(1.0);
       if ( sensor.vbat <= NGBATT ) {
         output_motor_task.detach();
@@ -90,7 +93,9 @@ int main(){
       }
     } else if ( mode == 0 ){
       //waiting task
-      leds[1] = 1;
+      
+      leds[1] = !leds[1] ;
+      wait(1.0) ;
     }
   }
 }
@@ -127,10 +132,20 @@ void init(){
 }
 
 void set_sensor_value(){
-  sma_vbat.add(voltage_batt);
-  sensor.vbat = sma_vbat.get();
-  //これをくりかえす
+  float mpu_val[3] ;
 
+  //read sensor value and add it to Simple Moving Average
+  sma_vbat.add(voltage_batt);
+  imu.read(mpu_val);
+  sma_ay.add(mpu_val[1]) ;
+  sma_omega.add(mpu_val[2]) ;
+  //photo sensor
+
+  //get value from SMA
+  sensor.vbat = sma_vbat.get();
+  sensor.ay = sma_ay.get();
+  sensor.omega = sma_omega.get();
+  //photo sensor
 }
 
 void set_motor_value(){
