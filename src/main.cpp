@@ -5,6 +5,8 @@
 #include "SMA.h"
 
 #define NGBATT 3.6
+#define TIMEOUT_PHOTOLED_US 50
+
 #define MOTOR_RESISTOR 4.5
 #define KE 0.0000748 //torque constant
 #define KT 0.00064 //back electoromotive
@@ -30,14 +32,15 @@ DigitalOut leds[] = { PB_4 , PB_5 };
 PwmOut enable[] = { PC_9 , PC_7 };
 DigitalOut phase[] = { PC_8 , PC_6 }; // 0 -- right, 1 -- left
 mpu6500_spi imu(mpu6500, PD_2);
-Ticker output_motor_task;
-//Ticker input_sensor_task;
+Ticker output_motor_task ;
+Ticker get_photo_task ;
+Timeout clear_photo_task ;
 
 SMA sma_vbat(3);
 //SMA sma_ax(10);
 SMA sma_ay(10);
 SMA sma_omega(10);
-SMA sma_photo[4] = { SMA(5), SMA(5), SMA(5), SMA(5) } ;
+SMA sma_photo[4] = { SMA(3), SMA(3), SMA(3), SMA(3) } ;
 
 // stract
 typedef struct {
@@ -59,8 +62,9 @@ const float F_C4[2] = { ( (MOTOR_RESISTOR*TIRE_R*WHEEL_LOSS_R) / (KT*GEAR_RATIO)
 
 // fuction
 void init();
-float get_photovalue(int);
-float get_Angle(bool);
+void get_photovalue();
+void clear_photovalue();
+//float get_Angle(bool);
 void feadfoward(float *_duty);
 void feadback(float *_error);
 void set_sensor_value();
@@ -68,32 +72,36 @@ void set_motor_value();
 
 // grobal varience
 int mode = 0 ;
+int photo_sw = 0 ;
+float photo_temp_value[2] ;
 
 // preset data
 const int preset_size = 3 ;
-float preset[preset_size][3] = { {1, 0, 1} , {0, 0, 1} , {-1, 0, 1} } ; //(accel, omega, time)
+float preset[preset_size][3] = { {0.5, 0, 1} , {0, 0, 1} , {-0.5, 0, 1} } ; //(accel, omega, time)
 
 int main(){
   init();
 
   mode = 1 ;
   //output_motor_task.attach(&set_motor_value, 0.001);
-  //input_sensor_task.attach(&set_sensor_value, 0.001) ;
+  get_photo_task.attach_us(&get_photovalue, 500);
+
 
   while (true) {
+    set_sensor_value() ;
     if ( mode == 1 ){
       // runnig task
 
       //pc.printf( "%6.4f\n\r" , get_photovalue(0) ) ;
-      set_sensor_value() ;
-      wait(1.0);
+      //wait(1.0);
       if ( sensor.vbat <= NGBATT ) {
         output_motor_task.detach();
+        enable[0] = 0 ; enable[1] = 0;
         mode = 0;
       }
     } else if ( mode == 0 ){
       //waiting task
-      
+
       leds[1] = !leds[1] ;
       wait(1.0) ;
     }
@@ -139,13 +147,11 @@ void set_sensor_value(){
   imu.read(mpu_val);
   sma_ay.add(mpu_val[1]) ;
   sma_omega.add(mpu_val[2]) ;
-  //photo sensor
 
   //get value from SMA
   sensor.vbat = sma_vbat.get();
   sensor.ay = sma_ay.get();
   sensor.omega = sma_omega.get();
-  //photo sensor
 }
 
 void set_motor_value(){
@@ -198,7 +204,7 @@ void feadback(float *_error){
   return ;
 }
 
-float get_Angle(bool cs){
+/*float get_Angle(bool cs){
   uint16_t read_val;
   float return_val;
 
@@ -221,20 +227,39 @@ float get_Angle(bool cs){
     return_val = -1 ;
   }
   return return_val;
+}*/
+
+void get_photovalue( ){
+  // 0 ... right side, 3 ... left side
+
+  if ( photo_sw == 0 ){
+    photo_temp_value[0] = ltr4206[0].read();
+    photo_temp_value[1] = ltr4206[2].read();
+    osi5[0] = 1 ; osi5[2] = 1 ;
+    clear_photo_task.attach_us(&clear_photovalue, TIMEOUT_PHOTOLED_US) ;
+  } else if ( photo_sw == 1 ){
+    photo_temp_value[0] = ltr4206[1].read();
+    photo_temp_value[1] = ltr4206[3].read();
+    osi5[1] = 1 ; osi5[3] = 1 ;
+    clear_photo_task.attach_us(&clear_photovalue, TIMEOUT_PHOTOLED_US) ;
+  }
 }
 
-float get_photovalue(int pin){
-  // 0 ... right side, 3 ... left side
-  float temp;
-
-  if ( pin < 4 && pin >= 0 ){
-    temp = ltr4206[pin].read();
-    osi5[pin] = 1;
-    wait_us(60);
-    temp = ltr4206[pin].read() - temp;
-    osi5[pin] = 0;
-    return temp;
-  } else {
-    return 0;
+void clear_photovalue(){
+  if ( photo_sw == 0 ){
+    sma_photo[0].add(ltr4206[0].read() - photo_temp_value[0]) ;
+    sma_photo[2].add(ltr4206[2].read() - photo_temp_value[1]) ;
+    osi5[0] = 0; osi5[2] = 0;
+    photo_sw = 1 ;
+    sensor.photo[0] = sma_photo[0].get();
+    sensor.photo[2] = sma_photo[2].get();
+  } else if ( photo_sw == 1 ) {
+    sma_photo[1].add(ltr4206[1].read() - photo_temp_value[0]) ;
+    sma_photo[3].add(ltr4206[3].read() - photo_temp_value[1]) ;
+    osi5[1] = 0; osi5[3] = 0;
+    photo_sw = 0 ;
+    sensor.photo[1] = sma_photo[1].get();
+    sensor.photo[3] = sma_photo[3].get();
   }
+  return ;
 }
