@@ -6,6 +6,7 @@
 
 #define NGBATT 3.6
 #define TIMEOUT_PHOTOLED_US 50
+#define TONE_MOTOR 0.001
 
 #define MOTOR_RESISTOR 4.5
 #define KE 0.0000748 //torque constant
@@ -14,8 +15,8 @@
 #define VCC 3.29 //mcu power voltage
 #define TREAD 0.037
 #define INERTIA 1.0 //Moment of inertia
-#define WHEEL_LOSS_R 0
-#define WHEEL_LOSS_L 0
+#define WHEEL_LOSS_R 0.0501
+#define WHEEL_LOSS_L 0.05
 #define MASS 0.0156
 #define TIRE_R 0.006
 
@@ -55,18 +56,24 @@ typedef struct {
 sensor_t sensor;
 
 // constant
+// for Fead Foaed
 const float F_C1 = (MOTOR_RESISTOR*MASS*TIRE_R)/(2.0*KT*GEAR_RATIO) ;
 const float F_C2 = (MOTOR_RESISTOR*INERTIA*TIRE_R)/(TREAD*KT*GEAR_RATIO) ;
 const float F_C3 = (60.0*GEAR_RATIO*KE)/(2.0*3.14*TIRE_R) ;
 const float F_C4[2] = { ( (MOTOR_RESISTOR*TIRE_R*WHEEL_LOSS_R) / (KT*GEAR_RATIO)) , ( (MOTOR_RESISTOR*TIRE_R*WHEEL_LOSS_L) / (KT*GEAR_RATIO)) } ;
+// for Fead Back
+const float Kp = 0 ;
+const float Ki = 0 ;
+const float Kd = 0 ;
 
 // fuction
 void init();
 void get_photovalue();
 void clear_photovalue();
 //float get_Angle(bool);
-void feadfoward(float *_duty);
-void feadback(float *_error);
+void feadfoward(float *_duty, float t_accel, float t_omega );
+float feadback_a (float);
+float feadback_w (float);
 void set_sensor_value();
 void set_motor_value();
 
@@ -77,34 +84,42 @@ float photo_temp_value[2] ;
 
 // preset data
 const int preset_size = 3 ;
-float preset[preset_size][3] = { {0.5, 0, 1} , {0, 0, 1} , {-0.5, 0, 1} } ; //(accel, omega, time)
+float preset[preset_size][3] = { { 1.0, 0, 500 } , { 0, 0, 250 } , { -1.0, 0, 500 } } ; //(accel, omega, time_ms)
 
 int main(){
   init();
+  wait(0.1) ;
+  for ( int i = 0 ; i < 10 ; i++ ){
+    set_sensor_value() ;
+  }
+  wait(1.0) ;
 
   mode = 1 ;
-  //output_motor_task.attach(&set_motor_value, 0.001);
+  output_motor_task.attach(&set_motor_value, TONE_MOTOR);
   get_photo_task.attach_us(&get_photovalue, 500);
 
 
   while (true) {
     set_sensor_value() ;
+    pc.printf( "%6.4f\n\r" , sensor.vbat ) ;
+    if ( sensor.vbat <= NGBATT ) {
+      mode = 0;
+    }
     if ( mode == 1 ){
       // runnig task
 
-      //pc.printf( "%6.4f\n\r" , get_photovalue(0) ) ;
       //wait(1.0);
-      if ( sensor.vbat <= NGBATT ) {
-        output_motor_task.detach();
-        enable[0] = 0 ; enable[1] = 0;
-        mode = 0;
-      }
     } else if ( mode == 0 ){
-      //waiting task
-
-      leds[1] = !leds[1] ;
-      wait(1.0) ;
+      //low power mode
+      output_motor_task.detach();
+      get_photo_task.detach();
+      enable[0] = 0 ; enable[1] = 0;
+      while ( true ){
+        leds[1] = !leds[1] ;
+        wait(1.0) ;
+      }
     }
+    wait(0.001) ;
   }
 }
 
@@ -149,16 +164,38 @@ void set_sensor_value(){
   sma_omega.add(mpu_val[2]) ;
 
   //get value from SMA
-  sensor.vbat = sma_vbat.get();
+  sensor.vbat = sma_vbat.get() * VCC * 2.0 ;
   sensor.ay = sma_ay.get();
   sensor.omega = sma_omega.get();
 }
 
 void set_motor_value(){
-  static float duty[2];
+  float duty[2];
+  static int past_time = 0;
+  static int loadmatrix = 0;
+  float accel, omega ;
 
-  feadfoward(duty);
-  //feadback(duty);
+  if ( loadmatrix < preset_size ){ // Can read matrix -> set a and omega
+    //get preset data
+    accel = preset[loadmatrix][0];
+    omega = preset[loadmatrix][1];
+    if ( past_time >= preset[loadmatrix][2] ){
+      loadmatrix++;
+      past_time = 0;
+    } else {
+      past_time++;
+    }
+    //Add Fead Back
+    //accel = accel + feadback_a(accel);
+    //omega = omega + feadback_w(omega);
+    //Attach Fead Foard and deside duty
+    feadfoward(duty , accel , omega );
+
+  } else { // Cannot read matrix -> Stop
+      duty[0] = 0 ;
+      duty[1] = 0 ;
+  }
+
   for ( int i = 0 ; i < 2 ; i++ ){
     if ( duty[i] < 0 ){
       phase[i] = 0 ;
@@ -168,40 +205,44 @@ void set_motor_value(){
       enable[i] = duty[i] ;
     }
   }
+  //pc.printf("%f", duty[0]);
 
 }
 
-void feadfoward(float *_duty){
-  static int past_time = 0;
-  static int loadmatrix = 0;
+void feadfoward(float *_duty, float t_accel, float t_omega){
   static float speed = 0.0 ;
-  float t_accel, t_omega ;
 
-  if ( loadmatrix < preset_size ){
-    //get preset data
-    t_accel = preset[loadmatrix][0];
-    t_omega = preset[loadmatrix][1];
-    if ( float(past_time/1000) >= preset[loadmatrix][2] ){
-      loadmatrix++;
-      past_time = 0;
-    } else {
-      past_time++;
-    }
-    //calculate speed
-    speed = speed + t_accel*0.001;
-    //calculate duty
-    _duty[0] = ( F_C1*t_accel + F_C2*t_omega + F_C3*speed + F_C4[0] ) / sensor.vbat ;
-    _duty[1] = ( F_C1*t_accel - F_C2*t_omega + F_C3*speed + F_C4[1] ) / sensor.vbat ;
+  //calculate speed
+  speed = speed + ( t_accel * TONE_MOTOR ) ;
+  //calculate duty
+  _duty[0] = ( F_C1*t_accel + F_C2*t_omega + F_C3*speed + F_C4[0] ) / sensor.vbat ;
+  _duty[1] = ( F_C1*t_accel - F_C2*t_omega + F_C3*speed + F_C4[1] ) / sensor.vbat ;
 
-  } else {
-    _duty[0] = 0 ;
-    _duty[1] = 0 ;
-  }
   return ;
 }
 
-void feadback(float *_error){
-  return ;
+float feadback_a( float theory ){
+  static float sumup_i  = 0 ;
+  static float old_error = 0 ;
+  float error , val ;
+
+  error = theory - sensor.ay ;
+  sumup_i = sumup_i + error * TONE_MOTOR ;
+  val = ( Kp * error + Ki * sumup_i + Kd * ( error - old_error ) / TONE_MOTOR ) ;
+  old_error = error ;
+  return val ;
+}
+
+float feadback_w( float theory ){
+  static float sumup_i  = 0 ;
+  static float old_error = 0 ;
+  float error , val ;
+
+  error = theory - sensor.omega ;
+  sumup_i = sumup_i + error * TONE_MOTOR ;
+  val = ( Kp * error + Ki * sumup_i + Kd * ( error - old_error ) / TONE_MOTOR ) ;
+  old_error = error ;
+  return val ;
 }
 
 /*float get_Angle(bool cs){
