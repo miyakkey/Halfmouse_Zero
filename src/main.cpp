@@ -1,4 +1,5 @@
 #include <math.h>
+#include <vector>
 
 #include "mbed.h"
 #include "MPU6500.h"
@@ -82,6 +83,8 @@ int mode = 0 ;
 int photo_sw = 0 ;
 float photo_temp_value[2] ;
 
+vector<float> logdata ;
+
 // preset data
 const int preset_size = 3 ;
 float preset[preset_size][3] = { { 1.0, 0, 500 } , { 0, 0, 250 } , { -1.0, 0, 500 } } ; //(accel, omega, time_ms)
@@ -95,8 +98,8 @@ int main(){
   wait(1.0) ;
 
   mode = 1 ;
-  output_motor_task.attach(&set_motor_value, TONE_MOTOR);
-  get_photo_task.attach_us(&get_photovalue, 500);
+  output_motor_task.attach(&set_motor_value, TONE_MOTOR) ;
+  get_photo_task.attach_us(&get_photovalue, 500) ;
 
 
   while (true) {
@@ -114,10 +117,22 @@ int main(){
       output_motor_task.detach();
       get_photo_task.detach();
       enable[0] = 0 ; enable[1] = 0;
+      leds[0] = 0 ;
       while ( true ){
         leds[1] = !leds[1] ;
         wait(1.0) ;
       }
+    } else if ( mode == 2 ){
+      //logger and waiting mode
+      if ( pc.getc() == 'L' ) {
+        pc.printf("\n\r") ;
+        pc.printf("------- Log data -------\n\r") ;
+        for ( int i = 0 ; i < logdata.size() ; i++ ){
+          pc.printf("%7.4f\n\r",logdata[i]) ;
+        }
+      }
+      leds[0] = 1 ;
+      wait(0.5) ;
     }
     wait(0.001) ;
   }
@@ -190,10 +205,12 @@ void set_motor_value(){
     //omega = omega + feadback_w(omega);
     //Attach Fead Foard and deside duty
     feadfoward(duty , accel , omega );
+    logdata.push_back(sensor.ay) ;
 
   } else { // Cannot read matrix -> Stop
       duty[0] = 0 ;
       duty[1] = 0 ;
+      mode = 2 ;
   }
 
   for ( int i = 0 ; i < 2 ; i++ ){
