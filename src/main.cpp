@@ -16,8 +16,8 @@
 #define VCC 3.29 //mcu power voltage
 #define TREAD 0.037
 #define INERTIA 1.0 //Moment of inertia
-#define WHEEL_LOSS_R 0.0501
-#define WHEEL_LOSS_L 0.05
+#define WHEEL_LOSS_R 0.0411
+#define WHEEL_LOSS_L 0.041
 #define MASS 0.0156
 #define TIRE_R 0.006
 
@@ -35,12 +35,10 @@ PwmOut enable[] = { PC_9 , PC_7 };
 DigitalOut phase[] = { PC_8 , PC_6 }; // 0 -- right, 1 -- left
 mpu6500_spi imu(mpu6500, PD_2);
 Ticker output_motor_task ;
-Ticker get_photo_task ;
-Timeout clear_photo_task ;
 
 SMA sma_vbat(3);
 //SMA sma_ax(10);
-SMA sma_ay(10);
+SMA sma_ay(20);
 SMA sma_omega(10);
 SMA sma_photo[4] = { SMA(3), SMA(3), SMA(3), SMA(3) } ;
 
@@ -69,8 +67,6 @@ const float Kd = 0 ;
 
 // fuction
 void init();
-void get_photovalue();
-void clear_photovalue();
 //float get_Angle(bool);
 void feadfoward(float *_duty, float t_accel, float t_omega );
 float feadback_a (float);
@@ -80,31 +76,26 @@ void set_motor_value();
 
 // grobal varience
 int mode = 0 ;
-int photo_sw = 0 ;
-float photo_temp_value[2] ;
-
-vector<float> logdata ;
+float logdata[1500][2] ;
 
 // preset data
 const int preset_size = 3 ;
-float preset[preset_size][3] = { { 1.0, 0, 500 } , { 0, 0, 250 } , { -1.0, 0, 500 } } ; //(accel, omega, time_ms)
+float preset[preset_size][3] = { { 2.0, 0, 250 } , { 0, 0, 500 } , { -2.0, 0, 250 } } ; //(accel, omega, time_ms)
 
 int main(){
   init();
   wait(0.1) ;
-  for ( int i = 0 ; i < 10 ; i++ ){
+  for ( int i = 0 ; i < 20 ; i++ ){
     set_sensor_value() ;
   }
   wait(1.0) ;
 
   mode = 1 ;
   output_motor_task.attach(&set_motor_value, TONE_MOTOR) ;
-  get_photo_task.attach_us(&get_photovalue, 500) ;
 
 
   while (true) {
     set_sensor_value() ;
-    pc.printf( "%6.4f\n\r" , sensor.vbat ) ;
     if ( sensor.vbat <= NGBATT ) {
       mode = 0;
     }
@@ -115,7 +106,6 @@ int main(){
     } else if ( mode == 0 ){
       //low power mode
       output_motor_task.detach();
-      get_photo_task.detach();
       enable[0] = 0 ; enable[1] = 0;
       leds[0] = 0 ;
       while ( true ){
@@ -126,15 +116,15 @@ int main(){
       //logger and waiting mode
       if ( pc.getc() == 'L' ) {
         pc.printf("\n\r") ;
-        pc.printf("------- Log data -------\n\r") ;
-        for ( int i = 0 ; i < logdata.size() ; i++ ){
-          pc.printf("%7.4f\n\r",logdata[i]) ;
+        pc.printf("\n\r") ;
+        for ( unsigned int i = 0 ; i < 1500 ; i++ ){
+          pc.printf("%7.4f, %7.4f\n\r",logdata[i][0], logdata[i][1]) ;
         }
       }
       leds[0] = 1 ;
       wait(0.5) ;
     }
-    wait(0.001) ;
+    //wait(0.001) ;
   }
 }
 
@@ -171,17 +161,46 @@ void init(){
 
 void set_sensor_value(){
   float mpu_val[3] ;
+  static int photo_sw = 0 ;
+  float photo_temp_value[2] ;
 
   //read sensor value and add it to Simple Moving Average
-  sma_vbat.add(voltage_batt);
+  sma_vbat.add(voltage_batt * VCC * 2.0 );
   imu.read(mpu_val);
-  sma_ay.add(mpu_val[1]) ;
+  sma_ay.add(mpu_val[0] * -1.0 ) ;
   sma_omega.add(mpu_val[2]) ;
 
   //get value from SMA
-  sensor.vbat = sma_vbat.get() * VCC * 2.0 ;
+  sensor.vbat = sma_vbat.get() ;
   sensor.ay = sma_ay.get();
   sensor.omega = sma_omega.get();
+
+  //get value from photo transistor
+  if ( photo_sw == 0 ){
+    photo_temp_value[0] = ltr4206[0].read();
+    photo_temp_value[1] = ltr4206[2].read();
+    osi5[0] = 1 ; osi5[2] = 1 ;
+  } else if ( photo_sw == 1 ){
+    photo_temp_value[0] = ltr4206[1].read();
+    photo_temp_value[1] = ltr4206[3].read();
+    osi5[1] = 1 ; osi5[3] = 1 ;
+  }
+  wait_us(50) ;
+  if ( photo_sw == 0 ){
+    sma_photo[0].add(ltr4206[0].read() - photo_temp_value[0]) ;
+    sma_photo[2].add(ltr4206[2].read() - photo_temp_value[1]) ;
+    osi5[0] = 0; osi5[2] = 0;
+    photo_sw = 1 ;
+    sensor.photo[0] = sma_photo[0].get();
+    sensor.photo[2] = sma_photo[2].get();
+  } else if ( photo_sw == 1 ) {
+    sma_photo[1].add(ltr4206[1].read() - photo_temp_value[0]) ;
+    sma_photo[3].add(ltr4206[3].read() - photo_temp_value[1]) ;
+    osi5[1] = 0; osi5[3] = 0;
+    photo_sw = 0 ;
+    sensor.photo[1] = sma_photo[1].get();
+    sensor.photo[3] = sma_photo[3].get();
+  }
 }
 
 void set_motor_value(){
@@ -189,6 +208,7 @@ void set_motor_value(){
   static int past_time = 0;
   static int loadmatrix = 0;
   float accel, omega ;
+  static int i = 0 ;
 
   if ( loadmatrix < preset_size ){ // Can read matrix -> set a and omega
     //get preset data
@@ -205,7 +225,10 @@ void set_motor_value(){
     //omega = omega + feadback_w(omega);
     //Attach Fead Foard and deside duty
     feadfoward(duty , accel , omega );
-    logdata.push_back(sensor.ay) ;
+
+    logdata[i][0] = duty[0] ;
+    logdata[i][1] = sensor.ay ;
+    i++ ;
 
   } else { // Cannot read matrix -> Stop
       duty[0] = 0 ;
@@ -286,38 +309,3 @@ float feadback_w( float theory ){
   }
   return return_val;
 }*/
-
-void get_photovalue( ){
-  // 0 ... right side, 3 ... left side
-
-  if ( photo_sw == 0 ){
-    photo_temp_value[0] = ltr4206[0].read();
-    photo_temp_value[1] = ltr4206[2].read();
-    osi5[0] = 1 ; osi5[2] = 1 ;
-    clear_photo_task.attach_us(&clear_photovalue, TIMEOUT_PHOTOLED_US) ;
-  } else if ( photo_sw == 1 ){
-    photo_temp_value[0] = ltr4206[1].read();
-    photo_temp_value[1] = ltr4206[3].read();
-    osi5[1] = 1 ; osi5[3] = 1 ;
-    clear_photo_task.attach_us(&clear_photovalue, TIMEOUT_PHOTOLED_US) ;
-  }
-}
-
-void clear_photovalue(){
-  if ( photo_sw == 0 ){
-    sma_photo[0].add(ltr4206[0].read() - photo_temp_value[0]) ;
-    sma_photo[2].add(ltr4206[2].read() - photo_temp_value[1]) ;
-    osi5[0] = 0; osi5[2] = 0;
-    photo_sw = 1 ;
-    sensor.photo[0] = sma_photo[0].get();
-    sensor.photo[2] = sma_photo[2].get();
-  } else if ( photo_sw == 1 ) {
-    sma_photo[1].add(ltr4206[1].read() - photo_temp_value[0]) ;
-    sma_photo[3].add(ltr4206[3].read() - photo_temp_value[1]) ;
-    osi5[1] = 0; osi5[3] = 0;
-    photo_sw = 0 ;
-    sensor.photo[1] = sma_photo[1].get();
-    sensor.photo[3] = sma_photo[3].get();
-  }
-  return ;
-}
