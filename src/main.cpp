@@ -10,8 +10,8 @@
 #define TONE_MOTOR 0.001
 
 #define MOTOR_RESISTOR 4.5
-#define KE 0.0000748 //torque constant
-#define KT 0.00064 //back electoromotive
+#define KE 0.0000748 //back electoromotive
+#define KT 0.00064 //torque constant
 #define GEAR_RATIO 4.0
 #define VCC 3.29 //mcu power voltage
 #define TREAD 0.037
@@ -20,6 +20,7 @@
 #define WHEEL_LOSS_L 0.041
 #define MASS 0.0156
 #define TIRE_R 0.006
+#define TIRE_MASS 0
 
 // Inhelit Class
 AnalogIn voltage_batt (PA_4);
@@ -56,8 +57,8 @@ sensor_t sensor;
 
 // constant
 // for Fead Foaed
-const float F_C1 = (MOTOR_RESISTOR*MASS*TIRE_R)/(2.0*KT*GEAR_RATIO) ;
-const float F_C2 = (MOTOR_RESISTOR*INERTIA*TIRE_R)/(TREAD*KT*GEAR_RATIO) ;
+const float F_C1 = (MOTOR_RESISTOR * ( MASS+(TIRE_MASS*2.0) ) * TIRE_R)/(2.0*KT*GEAR_RATIO) ;
+const float F_C2 = ( (MOTOR_RESISTOR*TIRE_R)/(KT*GEAR_RATIO) ) * ( (INERTIA/TREAD)+(TIRE_MASS*TREAD/2.0) ) ;
 const float F_C3 = (60.0*GEAR_RATIO*KE)/(2.0*3.14*TIRE_R) ;
 const float F_C4[2] = { ( (MOTOR_RESISTOR*TIRE_R*WHEEL_LOSS_R) / (KT*GEAR_RATIO)) , ( (MOTOR_RESISTOR*TIRE_R*WHEEL_LOSS_L) / (KT*GEAR_RATIO)) } ;
 // for Fead Back
@@ -68,7 +69,7 @@ const float Kd = 0 ;
 // fuction
 void init();
 //float get_Angle(bool);
-void feadfoward(float *_duty, float t_accel, float t_omega );
+void feadfoward(float *_duty, float t_accel, float t_omega_dot );
 float feadback_a (float);
 float feadback_w (float);
 void set_sensor_value();
@@ -249,14 +250,16 @@ void set_motor_value(){
 
 }
 
-void feadfoward(float *_duty, float t_accel, float t_omega){
+void feadfoward(float *_duty, float t_accel, float t_omega_dot){
   static float speed = 0.0 ;
+  static float omega = 0.0 ;
 
-  //calculate speed
+  //calculate speed and omega
   speed = speed + ( t_accel * TONE_MOTOR ) ;
+  omega = omega + ( t_omega_dot * TONE_MOTOR ) ;
   //calculate duty
-  _duty[0] = ( F_C1*t_accel + F_C2*t_omega + F_C3*speed + F_C4[0] ) / sensor.vbat ;
-  _duty[1] = ( F_C1*t_accel - F_C2*t_omega + F_C3*speed + F_C4[1] ) / sensor.vbat ;
+  _duty[0] = ( F_C1*t_accel + F_C2*t_omega_dot + F_C3*(speed+INERTIA*omega/2.0) + F_C4[0] ) / sensor.vbat ;
+  _duty[1] = ( F_C1*t_accel - F_C2*t_omega_dot + F_C3*(speed-INERTIA*omega/2.0) + F_C4[1] ) / sensor.vbat ;
 
   return ;
 }
