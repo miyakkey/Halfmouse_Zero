@@ -15,12 +15,12 @@
 #define GEAR_RATIO 4.0
 #define VCC 3.29 //mcu power voltage
 #define TREAD 0.037
-#define INERTIA 1.0 //Moment of inertia
+#define INERTIA 0.00027 //Moment of inertia
 #define WHEEL_LOSS_R 0.0411
 #define WHEEL_LOSS_L 0.041
 #define MASS 0.0156
 #define TIRE_R 0.006
-#define TIRE_MASS 0
+#define TIRE_MASS 0.0012
 
 // Inhelit Class
 AnalogIn voltage_batt (PA_4);
@@ -39,8 +39,8 @@ Ticker output_motor_task ;
 
 SMA sma_vbat(3);
 //SMA sma_ax(10);
-SMA sma_ay(20);
-SMA sma_omega(10);
+SMA sma_ay(30);
+SMA sma_omega(30);
 SMA sma_photo[4] = { SMA(3), SMA(3), SMA(3), SMA(3) } ;
 
 // stract
@@ -48,8 +48,10 @@ typedef struct {
   float vbat ;
   //float ax ;
   float ay ;
-  float omega ;
+  float omegadot ;
   float photo[4] ;
+  float offset_ay ;
+  float offset_omegadot ;
 } sensor_t ;
 
 // Inherit struct
@@ -57,7 +59,7 @@ sensor_t sensor;
 
 // constant
 // for Fead Foaed
-const float F_C1 = (MOTOR_RESISTOR * ( MASS+(TIRE_MASS*2.0) ) * TIRE_R)/(2.0*KT*GEAR_RATIO) ;
+const float F_C1 = ( MOTOR_RESISTOR * ( MASS+(TIRE_MASS*2.0) ) * TIRE_R)/(2.0*KT*GEAR_RATIO) ;
 const float F_C2 = ( (MOTOR_RESISTOR*TIRE_R)/(KT*GEAR_RATIO) ) * ( (INERTIA/TREAD)+(TIRE_MASS*TREAD/2.0) ) ;
 const float F_C3 = (60.0*GEAR_RATIO*KE)/(2.0*3.14*TIRE_R) ;
 const float F_C4[2] = { ( (MOTOR_RESISTOR*TIRE_R*WHEEL_LOSS_R) / (KT*GEAR_RATIO)) , ( (MOTOR_RESISTOR*TIRE_R*WHEEL_LOSS_L) / (KT*GEAR_RATIO)) } ;
@@ -74,6 +76,7 @@ float feadback_a (float);
 float feadback_w (float);
 void set_sensor_value();
 void set_motor_value();
+void deside_offset();
 
 // grobal varience
 int mode = 0 ;
@@ -81,12 +84,14 @@ float logdata[1500][2] ;
 
 // preset data
 const int preset_size = 3 ;
-float preset[preset_size][3] = { { 2.0, 0, 250 } , { 0, 0, 500 } , { -2.0, 0, 250 } } ; //(accel, omega, time_ms)
+float preset[preset_size][3] = { { 0, 1.0, 250 } , { 0, 0, 250 } , { 0, -1.0, 250 } } ; //(accel, omega, time_ms)
 
 int main(){
   init();
   wait(0.1) ;
-  for ( int i = 0 ; i < 20 ; i++ ){
+  //deside offset value
+  deside_offset();
+  for ( int i = 0 ; i < 30 ; i++ ){
     set_sensor_value() ;
   }
   wait(1.0) ;
@@ -117,7 +122,6 @@ int main(){
       //logger and waiting mode
       if ( pc.getc() == 'L' ) {
         pc.printf("\n\r") ;
-        pc.printf("\n\r") ;
         for ( unsigned int i = 0 ; i < 1500 ; i++ ){
           pc.printf("%7.4f, %7.4f\n\r",logdata[i][0], logdata[i][1]) ;
         }
@@ -141,6 +145,14 @@ void init(){
   pc.baud(115200);
   pc.printf("Reset\n\r");
 
+  //print const value
+  pc.printf("-----Feed Forward Constant Value-----\n\r") ;
+  pc.printf("C1 = %f \n\r", F_C1 ) ;
+  pc.printf("C2 = %f \n\r", F_C2 ) ;
+  pc.printf("C3 = %f \n\r", F_C3 ) ;
+  pc.printf("C4 = %f, %f \n\r", F_C4[0], F_C4[1] ) ;
+  //Sensor test
+  pc.printf("-----Sensor Test-----\n\r") ;
   //MPU6500
   wait(1);
   error = imu.init(1,BITS_DLPF_CFG_5HZ);
@@ -160,6 +172,22 @@ void init(){
   AS5047P.frequency(1000000);
 }
 
+void deside_offset(){
+  float mpu_val[3] ;
+  float sumup_a = 0;
+  float sumup_o = 0;
+
+  for ( int i = 0 ; i < 100 ; i++ ){
+    imu.read(mpu_val);
+    sumup_a = sumup_a + mpu_val[0] ;
+    sumup_o = sumup_o + mpu_val[2] ;
+    wait_us(10) ;
+  }
+  sensor.offset_ay = sumup_a / 100.0 * -1.0 ;
+  sensor.offset_omegadot = sumup_o /100.0 ;
+  return ;
+}
+
 void set_sensor_value(){
   float mpu_val[3] ;
   static int photo_sw = 0 ;
@@ -168,13 +196,13 @@ void set_sensor_value(){
   //read sensor value and add it to Simple Moving Average
   sma_vbat.add(voltage_batt * VCC * 2.0 );
   imu.read(mpu_val);
-  sma_ay.add(mpu_val[0] * -1.0 ) ;
-  sma_omega.add(mpu_val[2]) ;
+  sma_ay.add(mpu_val[0] * -1.0 - sensor.offset_ay ) ;
+  sma_omega.add(mpu_val[2] - sensor.offset_omegadot ) ;
 
   //get value from SMA
   sensor.vbat = sma_vbat.get() ;
   sensor.ay = sma_ay.get();
-  sensor.omega = sma_omega.get();
+  sensor.omegadot = sma_omega.get();
 
   //get value from photo transistor
   if ( photo_sw == 0 ){
@@ -281,7 +309,7 @@ float feadback_w( float theory ){
   static float old_error = 0 ;
   float error , val ;
 
-  error = theory - sensor.omega ;
+  error = theory - sensor.omegadot ;
   sumup_i = sumup_i + error * TONE_MOTOR ;
   val = ( Kp * error + Ki * sumup_i + Kd * ( error - old_error ) / TONE_MOTOR ) ;
   old_error = error ;
