@@ -15,7 +15,7 @@
 #define GEAR_RATIO 4.0
 #define VCC 3.29 //mcu power voltage
 #define TREAD 0.037
-#define INERTIA 0.00027 //Moment of inertia
+#define INERTIA 0.00032 //Moment of inertia
 #define WHEEL_LOSS_R 0.0411
 #define WHEEL_LOSS_L 0.041
 #define MASS 0.0156
@@ -84,7 +84,7 @@ float logdata[1500][2] ;
 
 // preset data
 const int preset_size = 3 ;
-float preset[preset_size][3] = { { 0, 1.0, 250 } , { 0, 0, 250 } , { 0, -1.0, 250 } } ; //(accel, omega, time_ms)
+float preset[preset_size][3] = { { 0, 2.0, 250 } , { 0, 0, 250 } , { 0, -5.0, 250 } } ; //(accel, omega, time_ms)
 
 int main(){
   init();
@@ -191,7 +191,7 @@ void deside_offset(){
 void set_sensor_value(){
   float mpu_val[3] ;
   static int photo_sw = 0 ;
-  float photo_temp_value[2] ;
+  float photo_temp_value[2] = { 0, 0 } ;
 
   //read sensor value and add it to Simple Moving Average
   sma_vbat.add(voltage_batt * VCC * 2.0 );
@@ -256,7 +256,7 @@ void set_motor_value(){
     feadfoward(duty , accel , omega );
 
     logdata[i][0] = duty[0] ;
-    logdata[i][1] = sensor.ay ;
+    logdata[i][1] = duty[1] ;
     i++ ;
 
   } else { // Cannot read matrix -> Stop
@@ -278,16 +278,26 @@ void set_motor_value(){
 
 }
 
-void feadfoward(float *_duty, float t_accel, float t_omega_dot){
+void feadfoward(float *_duty, float t_accel, float t_omega_dot ){
   static float speed = 0.0 ;
   static float omega = 0.0 ;
+  float speed_at_tire[2] ;
 
   //calculate speed and omega
   speed = speed + ( t_accel * TONE_MOTOR ) ;
   omega = omega + ( t_omega_dot * TONE_MOTOR ) ;
+  speed_at_tire[0] = speed + omega * ( TREAD / 2.0 ) ;
+  speed_at_tire[1] = speed - omega * ( TREAD / 2.0 ) ;
   //calculate duty
-  _duty[0] = ( F_C1*t_accel + F_C2*t_omega_dot + F_C3*(speed+INERTIA*omega/2.0) + F_C4[0] ) / sensor.vbat ;
-  _duty[1] = ( F_C1*t_accel - F_C2*t_omega_dot + F_C3*(speed-INERTIA*omega/2.0) + F_C4[1] ) / sensor.vbat ;
+  _duty[0] =  F_C1*t_accel + F_C2*t_omega_dot + F_C3*(speed + ( TREAD*omega/2.0 ) ) ;
+  _duty[1] =  F_C1*t_accel - F_C2*t_omega_dot + F_C3*(speed - ( TREAD*omega/2.0 ) ) ;
+  for ( int i = 0 ; i < 2 ; i++ ){
+    if ( speed_at_tire[i] >= 0 ){
+      _duty[i] = ( _duty[i] + F_C4[i] ) / sensor.vbat ;
+    } else {
+      _duty[i] = ( _duty[i] - F_C4[i] ) / sensor.vbat ;
+    }
+  }
 
   return ;
 }
