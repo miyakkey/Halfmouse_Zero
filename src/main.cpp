@@ -16,8 +16,8 @@
 #define VCC 3.29 //mcu power voltage
 #define TREAD 0.037
 #define INERTIA 0.00032 //Moment of inertia
-#define WHEEL_LOSS_R 0.0411
-#define WHEEL_LOSS_L 0.041
+#define WHEEL_LOSS_R 0.0403
+#define WHEEL_LOSS_L 0.040
 #define MASS 0.0156
 #define TIRE_R 0.006
 #define TIRE_MASS 0.0012
@@ -84,7 +84,8 @@ float logdata[1500][2] ;
 
 // preset data
 const int preset_size = 3 ;
-float preset[preset_size][3] = { { 0, 2.0, 250 } , { 0, 0, 250 } , { 0, -5.0, 250 } } ; //(accel, omega, time_ms)
+//float preset[preset_size][3] = { { 0, 2.0, 250 } , { 0, 0, 250 } , { 0, -5.0, 250 } } ; //(accel, omega, time_ms)
+float preset[preset_size][3] = { { 3.0 , 0.0, 250 } , { 0, 0, 500 } , { -3.0, 0.0, 250 } } ; //(accel, omega, time_ms)
 
 int main(){
   init();
@@ -256,7 +257,7 @@ void set_motor_value(){
     feadfoward(duty , accel , omega );
 
     logdata[i][0] = duty[0] ;
-    logdata[i][1] = duty[1] ;
+    logdata[i][1] = sensor.ay ;
     i++ ;
 
   } else { // Cannot read matrix -> Stop
