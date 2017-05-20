@@ -67,25 +67,34 @@ const float F_C4[2] = { ( (MOTOR_RESISTOR*TIRE_R*WHEEL_LOSS_R) / (KT*GEAR_RATIO)
 const float Kp = 0 ;
 const float Ki = 0 ;
 const float Kd = 0 ;
+// Speed etc
+const float target_max_omega = 1.0 ;
+const float target_max_speed = 0.8 ;
+const float target_accel = 3.0 ;
+const float taeget_omega_dot = 3.0 ;
 
 // fuction
 void init();
 //float get_Angle(bool);
-void feadfoward(float *_duty, float t_accel, float t_omega_dot );
-float feadback_a (float);
-float feadback_w (float);
-void set_sensor_value();
-void set_motor_value();
-void deside_offset();
+void feadfoward(float *_duty, float t_accel, float t_omega_dot, float _speed, float _omega ) ;
+float feadback_s (float) ;
+float feadback_w (float) ;
+void set_sensor_value() ;
+void set_motor_value() ;
+void deside_offset() ;
+void move(float*) ;
 
 // grobal varience
 int mode = 0 ;
 float logdata[1500][2] ;
 
 // preset data
-const int preset_size = 3 ;
+//const int preset_size = 3 ;
 //float preset[preset_size][3] = { { 0, 2.0, 250 } , { 0, 0, 250 } , { 0, -5.0, 250 } } ; //(accel, omega, time_ms)
-float preset[preset_size][3] = { { 3.0 , 0.0, 250 } , { 0, 0, 500 } , { -3.0, 0.0, 250 } } ; //(accel, omega, time_ms)
+//float preset[preset_size][3] = { { 3.0 , 0.0, 250 } , { 0, 0, 500 } , { -3.0, 0.0, 250 } } ; //(accel, omega, time_ms)
+std::vector<float> preset_distance = { 300.0 , 0.0 } ;
+std::vector<float> preset_radian = { 0.0 , 0.0 } ;
+
 
 int main(){
   init();
@@ -235,12 +244,54 @@ void set_sensor_value(){
 
 void set_motor_value(){
   float duty[2];
-  static int past_time = 0;
-  static int loadmatrix = 0;
-  float accel, omega ;
+  //static int past_time = 0;
+  static int load_location = 0 ;
+  static float mouse_distance = 0 ;
+  static float mouse_speed = 0 ;
+  static float load_distance = preset_distance[0] ;
+  float speed, omega ;
+
   static int i = 0 ;
 
-  if ( loadmatrix < preset_size ){ // Can read matrix -> set a and omega
+  //decide accel
+  //calcurate mouse distance
+  mouse_distance = mouse_distance + mouse_speed + TONE_MOTOR ;
+  //load distance ( if need )
+  if ( mouse_distance >= load_distance ) {
+    if ( load_location < preset_distance.size() ){
+      load_distance = preset_distance[load_location] ;
+      mouse_distance = 0.0 ;
+      load_location++;
+    } else {
+      // mode 1 -> 2
+      mode = 2 ;
+      duty[0] = 0.0 ; duty[1] = 0.0 ;
+      move(duty);
+      return ;
+    }
+  }
+  //calcurate ideal accel
+  if ( mouse_distance < load_distance ) {
+    if ( mouse_speed < target_max_speed ) {
+      speed = mouse_speed + target_accel * TONE_MOTOR ;
+    } else {
+      speed = target_max_speed ;
+    }
+  } else {
+    if ( mouse_speed > 0 ){
+      speed = mouse_speed - target_accel * TONE_MOTOR ;
+    } else {
+      speed = 0 ;
+    }
+  }
+  //add feadback (PID control) and calculate accel
+  accel = ( speed + feadback_s(mouse_speed) - mouse_speed ) / TONE_MOTOR ;
+  //keep speed value
+  //mouse_speed = speed ;
+
+
+
+  /*if ( loadmatrix < preset_size ){ // Can read matrix -> set a and omega
     //get preset data
     accel = preset[loadmatrix][0];
     omega = preset[loadmatrix][1];
@@ -264,8 +315,16 @@ void set_motor_value(){
       duty[0] = 0 ;
       duty[1] = 0 ;
       mode = 2 ;
-  }
+  }*/
+  //Attach Fead Foard and deside duty
+  feadfoward( duty , accel , omega , speed , omega );
+  mouse_speed = speed ;
+  move(duty);
+  //pc.printf("%f", duty[0]);
 
+}
+
+void move(float *_duty){
   for ( int i = 0 ; i < 2 ; i++ ){
     if ( duty[i] < 0 ){
       phase[i] = 0 ;
@@ -275,23 +334,22 @@ void set_motor_value(){
       enable[i] = duty[i] ;
     }
   }
-  //pc.printf("%f", duty[0]);
-
+  return ;
 }
 
-void feadfoward(float *_duty, float t_accel, float t_omega_dot ){
-  static float speed = 0.0 ;
-  static float omega = 0.0 ;
+void feadfoward(float *_duty, float t_accel, float t_omega_dot, float _speed, float _omega ){
+  //static float speed = 0.0 ;
+  //static float omega = 0.0 ;
   float speed_at_tire[2] ;
 
   //calculate speed and omega
-  speed = speed + ( t_accel * TONE_MOTOR ) ;
-  omega = omega + ( t_omega_dot * TONE_MOTOR ) ;
-  speed_at_tire[0] = speed + omega * ( TREAD / 2.0 ) ;
-  speed_at_tire[1] = speed - omega * ( TREAD / 2.0 ) ;
+  //speed = speed + ( t_accel * TONE_MOTOR ) ;
+  //omega = omega + ( t_omega_dot * TONE_MOTOR ) ;
+  speed_at_tire[0] = _speed + _omega * ( TREAD / 2.0 ) ;
+  speed_at_tire[1] = _speed - _omega * ( TREAD / 2.0 ) ;
   //calculate duty
-  _duty[0] =  F_C1*t_accel + F_C2*t_omega_dot + F_C3*(speed + ( TREAD*omega/2.0 ) ) ;
-  _duty[1] =  F_C1*t_accel - F_C2*t_omega_dot + F_C3*(speed - ( TREAD*omega/2.0 ) ) ;
+  _duty[0] =  F_C1*t_accel + F_C2*t_omega_dot + F_C3 * ( speed_at_tire[0] ) ;
+  _duty[1] =  F_C1*t_accel - F_C2*t_omega_dot + F_C3 * ( speed_at_tire[1] ) ;
   for ( int i = 0 ; i < 2 ; i++ ){
     if ( speed_at_tire[i] >= 0 ){
       _duty[i] = ( _duty[i] + F_C4[i] ) / sensor.vbat ;
@@ -303,7 +361,8 @@ void feadfoward(float *_duty, float t_accel, float t_omega_dot ){
   return ;
 }
 
-float feadback_a( float theory ){
+// CHANGE :: I must change this feed back control to feed speed
+float feadback_s( float theory ){
   static float sumup_i  = 0 ;
   static float old_error = 0 ;
   float error , val ;
