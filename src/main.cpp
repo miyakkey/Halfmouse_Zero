@@ -49,6 +49,8 @@ typedef struct {
   //float ax ;
   float ay ;
   float omegadot ;
+  float speed ;
+  float omega ;
   float photo[4] ;
   float offset_ay ;
   float offset_omegadot ;
@@ -152,6 +154,8 @@ void init(){
     enable[i].period_us(10);
     enable[i] = 0 ;
   }
+  sensor.speed = 0 ;
+  sensor.omega = 0 ;
   pc.baud(115200);
   pc.printf("Reset\n\r");
 
@@ -209,10 +213,12 @@ void set_sensor_value(){
   sma_ay.add(mpu_val[0] * -1.0 - sensor.offset_ay ) ;
   sma_omega.add(mpu_val[2] - sensor.offset_omegadot ) ;
 
-  //get value from SMA
+  //get value from SMA and push sensor kouzoutai
   sensor.vbat = sma_vbat.get() ;
   sensor.ay = sma_ay.get();
   sensor.omegadot = sma_omega.get();
+  sensor.speed = sensor.speed + sensor.ay * TONE_MOTOR ;
+  sensor.omega = sensor.omega + sensor.omegadot * TONE_MOTOR ;
 
   //get value from photo transistor
   if ( photo_sw == 0 ){
@@ -247,10 +253,13 @@ void set_motor_value(){
   //static int past_time = 0;
   static int load_location = 0 ;
   static float mouse_distance = 0 ;
+  static float mouse_radian = 0 ;
   static float mouse_speed = 0 ;
+  static float mouse_omega = 0 ;
   static float load_distance = preset_distance[0] ;
+  static float load_radian = preset_radian[0] ;
   float speed, omega ;
-
+  //Loger
   static int i = 0 ;
 
   //decide accel
@@ -289,39 +298,16 @@ void set_motor_value(){
   //keep speed value
   //mouse_speed = speed ;
 
-
-
-  /*if ( loadmatrix < preset_size ){ // Can read matrix -> set a and omega
-    //get preset data
-    accel = preset[loadmatrix][0];
-    omega = preset[loadmatrix][1];
-    if ( past_time >= preset[loadmatrix][2] ){
-      loadmatrix++;
-      past_time = 0;
-    } else {
-      past_time++;
-    }
-    //Add Fead Back
-    //accel = accel + feadback_a(accel);
-    //omega = omega + feadback_w(omega);
-    //Attach Fead Foard and deside duty
-    feadfoward(duty , accel , omega );
-
-    logdata[i][0] = duty[0] ;
-    logdata[i][1] = sensor.ay ;
-    i++ ;
-
-  } else { // Cannot read matrix -> Stop
-      duty[0] = 0 ;
-      duty[1] = 0 ;
-      mode = 2 ;
-  }*/
   //Attach Fead Foard and deside duty
   feadfoward( duty , accel , omega , speed , omega );
   mouse_speed = speed ;
   move(duty);
-  //pc.printf("%f", duty[0]);
 
+  logdata[i][0] = duty[0] ;
+  logdata[i][1] = sensor.ay ;
+  i++ ;
+
+  return ;
 }
 
 void move(float *_duty){
@@ -361,13 +347,12 @@ void feadfoward(float *_duty, float t_accel, float t_omega_dot, float _speed, fl
   return ;
 }
 
-// CHANGE :: I must change this feed back control to feed speed
 float feadback_s( float theory ){
   static float sumup_i  = 0 ;
   static float old_error = 0 ;
   float error , val ;
 
-  error = theory - sensor.ay ;
+  error = theory - sensor.speed ;
   sumup_i = sumup_i + error * TONE_MOTOR ;
   val = ( Kp * error + Ki * sumup_i + Kd * ( error - old_error ) / TONE_MOTOR ) ;
   old_error = error ;
@@ -379,7 +364,7 @@ float feadback_w( float theory ){
   static float old_error = 0 ;
   float error , val ;
 
-  error = theory - sensor.omegadot ;
+  error = theory - sensor.omega ;
   sumup_i = sumup_i + error * TONE_MOTOR ;
   val = ( Kp * error + Ki * sumup_i + Kd * ( error - old_error ) / TONE_MOTOR ) ;
   old_error = error ;
