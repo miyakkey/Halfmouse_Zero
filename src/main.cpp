@@ -73,7 +73,7 @@ const float Kd = 0 ;
 const float target_max_omega = 1.0 ;
 const float target_max_speed = 0.8 ;
 const float target_accel = 3.0 ;
-const float taeget_omega_dot = 3.0 ;
+const float target_omega_dot = 3.0 ;
 
 // fuction
 void init();
@@ -91,11 +91,12 @@ int mode = 0 ;
 float logdata[1500][2] ;
 
 // preset data
-//const int preset_size = 3 ;
+const int preset_size = 2 ;
 //float preset[preset_size][3] = { { 0, 2.0, 250 } , { 0, 0, 250 } , { 0, -5.0, 250 } } ; //(accel, omega, time_ms)
 //float preset[preset_size][3] = { { 3.0 , 0.0, 250 } , { 0, 0, 500 } , { -3.0, 0.0, 250 } } ; //(accel, omega, time_ms)
-std::vector<float> preset_distance = { 300.0 , 0.0 } ;
-std::vector<float> preset_radian = { 0.0 , 0.0 } ;
+float preset_distance[preset_size] = { 300.0 , 100.0 } ; // distance (mm)
+float preset_angle[preset_size] = { 0.0 , 0.0 } ; // angle (radian) ( -pi to +pi )
+float preset_stop[preset_size] = { 0.0 , 1.0 } ;
 
 
 int main(){
@@ -253,23 +254,31 @@ void set_motor_value(){
   //static int past_time = 0;
   static int load_location = 0 ;
   static float mouse_distance = 0 ;
-  static float mouse_radian = 0 ;
+  static float mouse_angle = 0 ;
   static float mouse_speed = 0 ;
   static float mouse_omega = 0 ;
   static float load_distance = preset_distance[0] ;
-  static float load_radian = preset_radian[0] ;
+  static float load_angle = preset_angle[0] ;
+  bool unload_flag = 0 ;
+  static bool stop_flag = 0 ;
+  //static int flag_stop = preset_stop[0] ;
   float speed, omega ;
+  float accel, omegadot ;
   //Loger
   static int i = 0 ;
 
   //decide accel
-  //calcurate mouse distance
-  mouse_distance = mouse_distance + mouse_speed + TONE_MOTOR ;
+  //calcurate mouse distance and radian
+  mouse_distance = mouse_distance + mouse_speed * TONE_MOTOR ;
+  mouse_angle = mouse_angle + mouse_omega * TONE_MOTOR ;
   //load distance ( if need )
-  if ( mouse_distance >= load_distance ) {
-    if ( load_location < preset_distance.size() ){
+  if ( ( mouse_distance >= load_distance ) && ( mouse_angle >= load_angle ) ) {
+    if ( load_location < preset_size ){
       load_distance = preset_distance[load_location] ;
+      load_angle = preset_angle[load_location] ;
+      stop_flag = preset_stop[load_location] ;
       mouse_distance = 0.0 ;
+      mouse_angle = 0.0 ;
       load_location++;
     } else {
       // mode 1 -> 2
@@ -279,28 +288,65 @@ void set_motor_value(){
       return ;
     }
   }
-  //calcurate ideal accel
-  if ( mouse_distance < load_distance ) {
+  //calculate ideal speed and angle speed
+  //calcurate ideal speed
+  if ( ( mouse_speed / target_accel ) + mouse_distance < load_distance ) {
     if ( mouse_speed < target_max_speed ) {
       speed = mouse_speed + target_accel * TONE_MOTOR ;
     } else {
       speed = target_max_speed ;
     }
   } else {
-    if ( mouse_speed > 0 ){
-      speed = mouse_speed - target_accel * TONE_MOTOR ;
+    if ( stop_flag == 1 ) {
+      if ( mouse_speed > 0 ){
+        speed = mouse_speed - target_accel * TONE_MOTOR ;
+      } else {
+        speed = 0.0 ;
+      }
     } else {
-      speed = 0 ;
+      speed = mouse_speed ;
+    }
+  }
+  //calculate ideal angle speed (omega)
+  if ( load_angle > 0 ){
+    if ( ( mouse_angle / target_max_omega ) + mouse_angle < load_angle ) {
+      if ( mouse_omega < target_max_omega ) {
+        omega = mouse_omega + target_omega_dot * TONE_MOTOR ;
+      } else {
+        omega = target_max_omega ;
+      }
+    } else {
+      if ( mouse_omega > 0 ){
+        omega = mouse_omega - target_omega_dot * TONE_MOTOR ;
+      } else {
+        omega = 0 ;
+      }
+    }
+  } else if ( load_angle < 0 ){
+    if ( ( mouse_angle / target_max_omega ) - mouse_angle > load_angle ) {
+      if ( mouse_omega > target_max_omega * -1.0 ) {
+        omega = mouse_omega - target_omega_dot * TONE_MOTOR ;
+      } else {
+        omega = target_max_omega * -1.0 ;
+      }
+    } else {
+      if ( mouse_omega < 0 ){
+        omega = mouse_omega + target_omega_dot * TONE_MOTOR ;
+      } else {
+        omega = 0 ;
+      }
     }
   }
   //add feadback (PID control) and calculate accel
   accel = ( speed + feadback_s(mouse_speed) - mouse_speed ) / TONE_MOTOR ;
+  omegadot = ( omega + feadback_w(mouse_omega) - mouse_omega ) / TONE_MOTOR ;
   //keep speed value
   //mouse_speed = speed ;
 
   //Attach Fead Foard and deside duty
-  feadfoward( duty , accel , omega , speed , omega );
+  feadfoward( duty , accel , omegadot , speed , omega );
   mouse_speed = speed ;
+  mouse_omega = omega ;
   move(duty);
 
   logdata[i][0] = duty[0] ;
@@ -312,12 +358,12 @@ void set_motor_value(){
 
 void move(float *_duty){
   for ( int i = 0 ; i < 2 ; i++ ){
-    if ( duty[i] < 0 ){
+    if ( _duty[i] < 0 ){
       phase[i] = 0 ;
-      enable[i] = fabsf(duty[i]) ;
+      enable[i] = fabsf(_duty[i]) ;
     } else {
       phase[i] = 1 ;
-      enable[i] = duty[i] ;
+      enable[i] = _duty[i] ;
     }
   }
   return ;
