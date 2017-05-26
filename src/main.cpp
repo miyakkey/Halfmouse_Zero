@@ -16,8 +16,8 @@
 #define VCC 3.29 //mcu power voltage
 #define TREAD 0.037
 #define INERTIA 0.00032 //Moment of inertia
-#define WHEEL_LOSS_R 0.0403
-#define WHEEL_LOSS_L 0.040
+#define WHEEL_LOSS_R 0.0363
+#define WHEEL_LOSS_L 0.0360
 #define MASS 0.0156
 #define TIRE_R 0.006
 #define TIRE_MASS 0.0012
@@ -84,7 +84,7 @@ float logdata[1500][2] ;
 
 // preset data
 const int preset_size = 3 ;
-//float preset[preset_size][3] = { { 0, 2.0, 250 } , { 0, 0, 250 } , { 0, -5.0, 250 } } ; //(accel, omega, time_ms)
+//float preset[preset_size][3] = { { 0, 2.0, 250 } , { 0, 0, 250 } , { 0, -2.0, 250 } } ; //(accel, omega, time_ms)
 float preset[preset_size][3] = { { 3.0 , 0.0, 250 } , { 0, 0, 500 } , { -3.0, 0.0, 250 } } ; //(accel, omega, time_ms)
 
 int main(){
@@ -140,7 +140,7 @@ void init(){
   cs1 = 1; cs2 = 1;
   for ( int i = 0 ; i < 2 ; i++ ){
     leds[i] = 0 ;
-    enable[i].period_us(10);
+    enable[i].period_us(15); //750kHz
     enable[i] = 0 ;
   }
   pc.baud(115200);
