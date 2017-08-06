@@ -4,6 +4,7 @@
 #include "mbed.h"
 #include "MPU6500.h"
 #include "SMA.h"
+#include "AS5050A.h"
 
 #define NGBATT 3.6
 #define TIMEOUT_PHOTOLED_US 50
@@ -28,9 +29,12 @@ Serial pc (PA_2, PA_3);
 AnalogIn ltr4206[] = { PC_0, PC_1, PC_2, PC_3 };
 DigitalOut osi5[] = { PB_6, PB_7, PB_8, PB_9 };
 SPI mpu6500 ( PC_12, PC_11, PC_10 );
-SPI AS5047P ( PA_7, PA_6, PA_5 );
-DigitalOut cs1 (PC_4);
-DigitalOut cs2 (PC_5);
+SPI AS5050A_1 ( PA_7, PA_6, PA_5 );
+SPI AS5050A_2 ( PB_15, PB_14, PB_13 );
+//DigitalOut cs1 (PC_4);
+//DigitalOut cs2 (PB_12);
+AS5050A rot_l (AS5050A_1, PC_4) ;
+AS5050A rot_r (AS5050A_2, PB_12) ;
 DigitalOut leds[] = { PB_4 , PB_5 };
 PwmOut enable[] = { PC_9 , PC_7 };
 DigitalOut phase[] = { PC_8 , PC_6 }; // 0 -- right, 1 -- left
@@ -97,8 +101,8 @@ int main(){
   }
   wait(1.0) ;
 
-  mode = 1 ;
-  output_motor_task.attach(&set_motor_value, TONE_MOTOR) ;
+  mode = 3 ;
+  //output_motor_task.attach(&set_motor_value, TONE_MOTOR) ;
 
 
   while (true) {
@@ -129,6 +133,14 @@ int main(){
       }
       leds[0] = 1 ;
       wait(0.5) ;
+    } else if ( mode == 3 ){
+      // test mode
+      // AS5050A test
+      float val[2] ;
+      val[0] = rot_l.read();
+      val[1] = rot_r.read();
+      pc.printf("%7.4f, %7.4f\n\r", val[0], val[1]);
+      wait(0.5);
     }
     //wait(0.001) ;
   }
@@ -137,7 +149,6 @@ int main(){
 void init(){
   int error;
 
-  cs1 = 1; cs2 = 1;
   for ( int i = 0 ; i < 2 ; i++ ){
     leds[i] = 0 ;
     enable[i].period_us(15); //750kHz
@@ -168,9 +179,17 @@ void init(){
     pc.printf("Acc_scale=%u\n\r",imu.set_acc_scale(BITS_FS_4G));          //Set full scale range for accs
     wait(0.1);
   }
-  //AS5047P
-  AS5047P.format(16, 1);
-  AS5047P.frequency(1000000);
+  //AS5050A
+  /*
+  cs1 = 1; cs2 = 1;
+  AS5050A_1.format(8, 1);
+  AS5050A_1.frequency(1000000);
+  AS5050A_2.format(8, 1);
+  AS5050A_2.frequency(1000000);
+  wait_us(580);
+  */
+  rot_l.init();
+  rot_r.init();
 }
 
 void deside_offset(){
@@ -326,28 +345,3 @@ float feadback_w( float theory ){
   old_error = error ;
   return val ;
 }
-
-/*float get_Angle(bool cs){
-  uint16_t read_val;
-  float return_val;
-
-  if ( cs == 1 ){
-    cs1 = 0 ;
-    wait_us(10);
-    read_val = AS5047P.write(0xFFFF);
-    wait_us(10);
-    cs1 = 1;
-    wait_us(100);
-    return_val = float( read_val & 0x3FFF ) * 360.0 / 16383.0 ;
-  } else if ( cs == 2 ){
-    cs2 = 0;
-    wait_us(10);
-    read_val = AS5047P.write(0xFFFF);
-    wait_us(10);
-    cs2 = 1;
-    return_val = float( read_val & 0x3FFF ) * 360.0 / 16383.0 ;
-  } else {
-    return_val = -1 ;
-  }
-  return return_val;
-}*/
